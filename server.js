@@ -28,6 +28,16 @@ app.get("/clients", (req, res) => {
     res.json(results);
   });
 });
+app.get("/getAnnonces", (req, res) => {
+  db.query("SELECT * FROM annonce", (err, results) => {
+    if (err) {
+      console.error("Erreur requête :", err);
+      return res.status(500).json(err);
+    }
+    console.log("✅ Résultat de la requête :", results);
+    res.json(results);
+  });
+});
 // POST ajouter une annonce
 app.post("/annonces", (req, res) => {
   const { titre, description, prix, image, localisation, statu, userId } = req.body;
