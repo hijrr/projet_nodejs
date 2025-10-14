@@ -28,6 +28,22 @@ app.get("/clients", (req, res) => {
     res.json(results);
   });
 });
+// POST ajouter une annonce
+app.post("/annonces", (req, res) => {
+  const { titre, description, prix, image, localisation, statu, userId } = req.body;
 
+  if (!titre || !userId) {
+    return res.status(400).json({ message: "Le titre et l'userId sont requis !" });
+  }
+
+  const sql = `INSERT INTO annonce 
+    (titre, description, prix, image, localisation, statu, userId) 
+    VALUES (?, ?, ?, ?, ?, ?, ?)`;
+
+  db.query(sql, [titre, description, prix, image, localisation, statu || 'ACTIVE', userId], (err, result) => {
+    if (err) return res.status(500).json(err);
+    res.status(201).json({ message: "Annonce ajoutée avec succès !", id: result.insertId });
+  });
+});
 const PORT = 5000;
 app.listen(PORT, () => console.log(`🚀 Serveur démarré sur http://localhost:${PORT}`));
