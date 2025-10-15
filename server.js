@@ -38,6 +38,20 @@ app.get("/getAnnonces", (req, res) => {
     res.json(results);
   });
 });
+//api get les 3 dernier annonce avec date 
+app.get("/get/3dernierAnnonces",(req,res)=>{
+  db.query("select * from annonce order by  dateCreation DESC limit 3",(err,results)=>{
+    if(err){
+        console.error("Erreur requête :", err);
+       return res.status(500).json(err);
+      
+    }
+      console.log("✅ Résultat de la requête :", results);
+       res.json(results); 
+  })
+}
+);
+
 // POST ajouter une annonce
 app.post("/annonces", (req, res) => {
   const { titre, description, prix, image, localisation, statu, userId } = req.body;
@@ -61,7 +75,6 @@ app.post("/annonces", (req, res) => {
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const SECRET_KEY = 'secret123';
-
 // Middleware pour vérifier le token
 function verifyToken(req, res, next) {
   const token = req.headers['authorization'];
@@ -74,8 +87,6 @@ function verifyToken(req, res, next) {
     next();
   });
 }
-
-
 app.post("/register", (req, res) => {
   const { nom, prénom, email, motDePasse, telephone, role } = req.body;
   console.log("Données reçues pour register :", req.body);
@@ -163,9 +174,6 @@ app.post("/login", (req, res) => {
     res.status(200).json(user); // renvoie l'objet user
   });
 });
-
-
-
 // Récupérer infos utilisateur
 app.get('/user', verifyToken, (req, res) => {
   const query = "SELECT userId, nom, prénom, email, telephone, role, dateInscri FROM utilisateur WHERE userId = ?";
@@ -175,7 +183,5 @@ app.get('/user', verifyToken, (req, res) => {
     res.json(results[0]);
   });
 });
-
-
 const PORT = 5000;
 app.listen(PORT, () => console.log(`🚀 Serveur démarré sur http://localhost:${PORT}`));
