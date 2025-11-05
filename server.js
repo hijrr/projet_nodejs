@@ -1,9 +1,9 @@
 const express = require("express");
 const mysql = require("mysql2");
 const cors = require("cors");
-const app = express();
+const app = express();//logicil serveur
 app.use(cors());
-app.use(express.json());
+app.use(express.json());//permet serveur de comprendre les fichiers json de front-end
 // Connexion à la base de données AlwaysData
 const db = mysql.createConnection({
   host: 'mysql-bassourahma.alwaysdata.net',
@@ -11,12 +11,10 @@ const db = mysql.createConnection({
   password: 'Rourou_18',
   database: 'bassourahma_12'
 });
-
 db.connect(err => {
   if (err) console.error("Erreur DB:", err);
   else console.log("✅ Connecté à la DB AlwaysData !");
 });
-
 // Exemple d'API pour récupérer les données
 app.get("/clients", (req, res) => {
   db.query("SELECT * FROM utilisateur", (err, results) => {
@@ -181,6 +179,23 @@ app.get('/user', verifyToken, (req, res) => {
     if (err) return res.status(500).json({ msg: 'Erreur serveur' });
     if (results.length === 0) return res.status(404).json({ msg: 'Utilisateur non trouvé' });
     res.json(results[0]);
+  });
+});
+// 📝 Ajouter une annonce (avec lien image)
+app.post("/api/annonces", (req, res) => {
+  const { titre, description, prix, image, localisation, type, duree, userId } = req.body;
+
+  const sql = `
+    INSERT INTO annonce (titre, description, prix, image, localisation, type, duree, userId, statu, dateCreation)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', NOW())
+  `;
+
+  db.query(sql, [titre, description, prix, image, localisation, type, duree, userId], (err, result) => {
+    if (err) {
+      console.error("Erreur SQL:", err);
+      return res.status(500).json({ message: "Erreur d’ajout de l’annonce" });
+    }
+    res.status(201).json({ message: "Annonce ajoutée avec succès" });
   });
 });
 const PORT = 5000;
