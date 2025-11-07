@@ -2,6 +2,9 @@ const express = require("express");
 const mysql = require("mysql2");
 const cors = require("cors");
 const app = express();//logicil serveur
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
 app.use(cors());
 app.use(express.json());//permet serveur de comprendre les fichiers json de front-end
 // Connexion à la base de données AlwaysData
@@ -26,6 +29,57 @@ app.get("/clients", (req, res) => {
     res.json(results);
   });
 });
+
+// Route pour récupérer les infos de l'utilisateur connecté
+app.get("/api/utilisateur/connecte/:userId", (req, res) => {
+  const userId = req.params.userId;
+
+  // Vérification basique
+  if (!userId) {
+    return res.status(400).json({ message: "userId manquant dans la requête" });
+  }
+
+  const sql = "SELECT * FROM utilisateur WHERE userId = ?";
+  db.query(sql, [userId], (err, result) => {
+    if (err) {
+      console.error("❌ Erreur MySQL :", err);
+      return res.status(500).json({ message: "Erreur serveur" });
+    }
+
+    if (result.length === 0) {
+      return res.status(404).json({ message: "Utilisateur non trouvé" });
+    }
+
+    // ✅ Retourne les infos de l'utilisateur connecté
+    res.status(200).json(result[0]);
+  });
+});
+
+
+
+// --- Mettre à jour le profil utilisateur ---
+app.put("/api/user/:id", (req, res) => {
+  const userId = req.params.id;
+  const { nom, prénom, email, motDePasse, telephone } = req.body;
+
+  const sql = "UPDATE utilisateur SET nom = ?, `prénom` = ?, email = ?, motDePasse = ?, telephone = ? WHERE userId = ?";
+  
+  db.query(sql, [nom, prénom, email, motDePasse, telephone, userId], (err, result) => {
+    if (err) {
+      console.error("Erreur MySQL :", err);
+      return res.status(500).json({ message: "Erreur serveur" });
+    }
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ message: "Utilisateur non trouvé" });
+    }
+
+    res.json({ message: "Profil mis à jour avec succès !" });
+  });
+});
+
+
+
 app.get("/getAnnonces", (req, res) => {
   db.query("SELECT * FROM annonce", (err, results) => {
     if (err) {
@@ -196,6 +250,63 @@ app.post("/api/annonces", (req, res) => {
       return res.status(500).json({ message: "Erreur d’ajout de l’annonce" });
     }
     res.status(201).json({ message: "Annonce ajoutée avec succès" });
+  });
+});
+
+
+
+
+
+//partie image profilee
+
+
+// dossier uploads (crée le si n'existe pas)
+const uploadDir = path.join('/home/rahma/projet_nodejs', 'uploads');
+if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir);
+
+// config multer
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, uploadDir);
+  },
+  filename: function (req, file, cb) {
+    const ext = path.extname(file.originalname);
+    const filename = Date.now() + '-' + Math.round(Math.random()*1e9) + ext;
+    cb(null, filename);
+  }
+});
+
+const upload = multer({
+  storage,
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB limit
+  fileFilter: (req, file, cb) => {
+    // n'autorise que les images
+    if (!file.mimetype.startsWith('image/')) {
+      return cb(new Error('Seulement les images sont autorisées'));
+    }
+    cb(null, true);
+  }
+});
+
+// rendre uploads accessible publiquement
+app.use('/uploads', express.static(uploadDir));
+
+// Ex: route pour uploader une image de profil
+app.post('/api/upload/profile-image', upload.single('profileImage'), (req, res) => {
+  const userId = req.body.userId; // ou extraire depuis token
+  if (!req.file) return res.status(400).json({ error: 'Aucun fichier' });
+
+  const filename = req.file.filename;
+  const imageUrl = `/uploads/${filename}`; // stocker ceci en DB
+
+  // exemple avec MySQL (ajuste selon ta config)
+  const sql = 'UPDATE utilisateur SET profileImage = ? WHERE userId = ?';
+  db.query(sql, [imageUrl, userId], (err, result) => {
+    if (err) {
+      console.error(err);
+      return res.status(500).json({ error: 'Erreur DB' });
+    }
+    return res.json({ message: 'Image uploadée', imageUrl });
   });
 });
 const PORT = 5000;
