@@ -110,9 +110,11 @@ app.get("/get/3dernierAnnonces", (req, res) => {
 });
 
 //  Get nombre des annonces actives
-app.get("/get/NombreAnnoncesActives", (req, res) => {
+app.get("/get/NombreAnnoncesActives/:userId", (req, res) => {
+  const userId = req.params.userId;
   db.query(
-    "SELECT COUNT(*) AS nombreAnnonceActive FROM annonce WHERE statu = 'ACTIVE'",
+    "SELECT COUNT(*) AS nombreAnnonceActive FROM annonce WHERE statu = 'ACTIVE' AND userId = ?",
+      [userId],
     (err, results) => {
       if (err) {
         console.error("❌ Erreur requête :", err);
@@ -120,15 +122,95 @@ app.get("/get/NombreAnnoncesActives", (req, res) => {
       }
 
       console.log("✅ Résultat de la requête :", results);
-      const nombre = results[0].nombreAnnonceActive;
-      res.json(nombre); // results[0] contient le nombre
+      res.json(results[0]); // results[0] contient le nombre
     }
   );
 });
 // get nombre annonces inactives
-app.get("/get/NombreAnnoncesINActives", (req, res) => {
+app.get("/get/NombreAnnoncesINActives/:userId", (req, res) => {
+   const userId = req.params.userId;
   db.query(
-    "SELECT COUNT(*) AS nombreAnnonceINActive FROM annonce WHERE statu = 'INACTIVE'",
+    "SELECT COUNT(*) AS nombreAnnonceINActive FROM annonce WHERE statu = 'INACTIVE' AND userId=?",
+     [userId],
+    (err, results) => {
+      if (err) {
+        console.error("❌ Erreur requête :", err);
+        return res.status(500).json({ error: "Erreur serveur" });
+      }
+
+      console.log("✅ Résultat de la requête :", results);
+      res.json(results[0]); // results[0] contient le nombre
+    }
+  );
+});
+// Get nombre demandes de clients pour un utilisateur spécifique
+app.get("/get/NombrdemandeClients/:userId", (req, res) => {
+  const userId = req.params.userId;
+  
+  db.query(
+    `SELECT COUNT(*) AS nombdemandesclinets 
+     FROM demandeloc d 
+     INNER JOIN annonce a ON d.annonceId = a.idAnnonce
+     WHERE a.userId = ?`,
+    [userId],
+    (err, results) => {
+      if (err) {
+        console.error("❌ Erreur requête :", err);
+        return res.status(500).json({ error: "Erreur serveur" });
+      }
+
+      console.log("✅ Résultat de la requête :", results);
+      res.json(results[0]); // results[0] contient le nombre
+    }
+  );
+});
+//api pour gere demmande clients 
+// Get toutes les demandes pour un propriétaire
+// Get toutes les demandes pour un propriétaire
+// Get toutes les demandes pour un propriétaire
+app.get("/get/demandes/:userId", (req, res) => {
+  const userId = req.params.userId;
+  
+  const sql = `
+    SELECT 
+      d.idDem,
+      d.dateDem,
+      d.datedebut,
+      d.dateFin,
+      d.statu,
+      d.userId as clientId,
+      d.annonceId,
+      a.titre as annonce_titre,
+      a.prix as annonce_prix,
+      a.localisation,
+      a.type,
+      a.duree,
+      u.nom as client_nom,
+      u.prénom as client_prenom,
+      u.email as client_email,
+      u.telephone as client_telephone
+    FROM demandeloc d
+    INNER JOIN annonce a ON d.annonceId = a.idAnnonce
+    INNER JOIN utilisateur u ON d.userId = u.userId
+    WHERE a.userId = ?
+    ORDER BY d.dateDem DESC
+  `;
+  
+  db.query(sql, [userId], (err, results) => {
+    if (err) {
+      console.error("Erreur récupération demandes:", err);
+      return res.status(500).json({ error: "Erreur serveur" });
+    }
+    console.log("✅ Demandes récupérées:", results.length);
+    res.json(results);
+  });
+});
+// get nombre des paiments effecutes 
+app.get("/get/nombrepaimenteffecute/:id", (req, res) => {
+    const userId = req.params.userId;
+  db.query(
+    "SELECT COUNT(*) AS nombrepaimenteffecute FROM paiment WHERE userId=?",
+    [userId],
     (err, results) => {
       if (err) {
         console.error("❌ Erreur requête :", err);
