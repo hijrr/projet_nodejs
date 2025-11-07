@@ -200,3 +200,132 @@ app.post("/api/annonces", (req, res) => {
 });
 const PORT = 5000;
 app.listen(PORT, () => console.log(`🚀 Serveur démarré sur http://localhost:${PORT}`));
+
+
+
+
+app.get("/api/stats", async (req, res) => {
+  try {
+    const stats = {};
+
+    // Compter le nombre d'utilisateurs
+    db.query("SELECT COUNT(*) AS total FROM utilisateur", (err, results) => {
+      if (err) return res.status(500).json({ error: err.message });
+      stats.utilisateurs = results[0].total;
+
+      // Compter le nombre d'annonces
+      db.query("SELECT COUNT(*) AS total FROM annonce", (err, results) => {
+        if (err) return res.status(500).json({ error: err.message });
+        stats.annonces = results[0].total;
+
+        // Compter le nombre d'offres
+        db.query("SELECT COUNT(*) AS total FROM offre", (err, results) => {
+          if (err) return res.status(500).json({ error: err.message });
+          stats.offres = results[0].total;
+
+          // Retourner toutes les statistiques
+          res.json(stats);
+        });
+      });
+    });
+  } catch (error) {
+    res.status(500).json({ message: "Erreur serveur", error });
+  }
+});
+
+app.get('/api/activities', (req, res) => {
+  const sql = `
+    SELECT 'annonce' AS type, titre AS nom, dateCreation AS date 
+    FROM annonce
+    UNION
+    SELECT 'offre' AS type, titre AS nom, dateCreation AS date 
+    FROM offre
+    UNION
+    SELECT 'paiement' AS type, CONCAT('Paiement de ', montant, ' DT') AS nom, datePaiement AS date 
+    FROM paiement
+    ORDER BY date DESC
+    LIMIT 10
+  `;
+
+  db.query(sql, (err, result) => {
+    if (err) {
+      console.error('Erreur lors de la récupération des activités :', err);
+      return res.status(500).json({ error: 'Erreur serveur' });
+    }
+    res.json(result);
+  });
+});
+
+
+// ✅ Récupérer tous les utilisateurs
+app.get("/api/utilisateurs", (req, res) => {
+  const sql = "SELECT * FROM utilisateur";
+  db.query(sql, (err, results) => {
+    if (err) {
+      console.error("Erreur de récupération :", err);
+      return res.status(500).json({ message: "Erreur serveur" });
+    }
+    res.json(results);
+  });
+});
+
+// ✅ Modifier le rôle d’un utilisateur
+app.put("/api/utilisateurs/:id/role", (req, res) => {
+  const userId = req.params.id;
+  const { role } = req.body;
+
+  const sql = "UPDATE utilisateur SET role = ? WHERE userId = ?";
+  db.query(sql, [role, userId], (err, result) => {
+    if (err) {
+      console.error("Erreur de mise à jour :", err);
+      return res.status(500).json({ message: "Erreur serveur" });
+    }
+    res.json({ message: "Rôle mis à jour avec succès" });
+  });
+});
+
+/* 📦 1. Récupérer toutes les annonces avec le nom de l'utilisateur */
+app.get("/GAnnonces", (req, res) => {
+  const sql = `
+    SELECT a.*, u.nom, u.prénom 
+    FROM annonce a
+    LEFT JOIN utilisateur u ON a.userId = u.userId
+    ORDER BY a.dateCreation DESC
+  `;
+  db.query(sql, (err, result) => {
+    if (err) {
+      console.error("Erreur lors de la récupération :", err);
+      return res.status(500).json({ message: "Erreur serveur" });
+    }
+    res.json(result);
+  });
+});
+
+/* ✏️ 2. Modifier le statut d'une annonce */
+app.put("/annonces/:id", (req, res) => {
+  const { id } = req.params;
+  const { statu } = req.body;
+
+  const sql = "UPDATE annonce SET statu = ? WHERE idAnnonce = ?";
+  db.query(sql, [statu, id], (err, result) => {
+    if (err) {
+      console.error("Erreur update :", err);
+      return res.status(500).json({ message: "Erreur serveur" });
+    }
+    res.json({ message: "Statut modifié avec succès" });
+  });
+});
+
+/* 🗑️ 3. Supprimer une annonce */
+app.delete("/annonces/:id", (req, res) => {
+  const { id } = req.params;
+
+  const sql = "DELETE FROM annonce WHERE idAnnonce = ?";
+  db.query(sql, [id], (err, result) => {
+    if (err) {
+      console.error("Erreur suppression :", err);
+      return res.status(500).json({ message: "Erreur serveur" });
+    }
+    res.json({ message: "Annonce supprimée avec succès" });
+  });
+});
