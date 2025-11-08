@@ -1,14 +1,10 @@
 const express = require("express");
 const mysql = require("mysql2");
 const cors = require("cors");
-<<<<<<< HEAD
 const app = express();//logicil serveur
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
-=======
-const app = express(); //logicil serveur
->>>>>>> 7acc620 (api nombre annonce active et inactive)
 app.use(cors());
 app.use(express.json()); //permet serveur de comprendre les fichiers json de front-end
 // Connexion à la base de données AlwaysData
@@ -414,12 +410,13 @@ app.post("/api/annonces", (req, res) => {
 
 //partie image profilee
 
-
+// eye: C:\licence\s5\projet d'integrration\projet_nodejs
 // dossier uploads (crée le si n'existe pas)
-const uploadDir = path.join('/home/rahma/projet_nodejs', 'uploads');
+const uploadDir = path.join(__dirname, "uploads");
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir);
 
 // config multer
+
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
     cb(null, uploadDir);
@@ -597,8 +594,41 @@ app.delete("/annonces/:id", (req, res) => {
     res.json({ message: "Annonce supprimée avec succès" });
   });
 });
-=======
+// GET /getOffres - Récupérer toutes les offres
+app.get("/getOffres", (req, res) => {
+  const sql = `
+    SELECT 
+      idOff,
+      titre,
+      description,
+      dateCreation,
+      prix,
+      date_fin
+    FROM offre
+  `;
+
+  db.query(sql, (err, results) => {
+    if (err) {
+      console.error("Erreur lors de la récupération des offres:", err);
+      return res.status(500).json({
+        success: false,
+        message: "Erreur serveur lors de la récupération des offres",
+        error: err.message
+      });
+    }
+
+    // Formater les dates pour un meilleur affichage
+    const offresFormatees = results.map(offre => ({
+      ...offre,
+      dateCreation: offre.dateCreation ? new Date(offre.dateCreation).toISOString().split('T')[0] : null,
+      date_fin: offre.date_fin ? new Date(offre.date_fin).toISOString().split('T')[0] : null
+    }));
+
+    console.log("✅ Offres récupérées:", offresFormatees.length);
+    res.status(200).json(offresFormatees);
+  });
+});
+
 app.listen(PORT, () =>
   console.log(`🚀 Serveur démarré sur http://localhost:${PORT}`)
 );
->>>>>>> 7acc620 (api nombre annonce active et inactive)
