@@ -80,6 +80,101 @@ app.put("/api/user/:id", (req, res) => {
   );
 });
 
+// 2. Récupérer les détails d’une annonce par ID
+app.get("/api/annonces/:id", (req, res) => {
+  const { id } = req.params;
+  const sql = "SELECT a.*, u.* FROM annonce a JOIN utilisateur u ON a.userId = u.userId WHERE a.idAnnonce = ?";
+  db.query(sql, [id], (err, results) => {
+    if (err) return res.status(500).json({ error: err });
+    if (results.length === 0) return res.status(404).json({ message: "Annonce non trouvée" });
+    res.json(results[0]);
+  });
+});
+
+
+// 3. Ajouter une annonce aux favoris
+app.post("/api/favoris", (req, res) => {
+  const { idAnnonce, userId } = req.body;
+
+  if (!idAnnonce || !userId) {
+    return res.status(400).json({ message: "idAnnonce et userId sont requis" });
+  }
+
+  // Vérifier si le favori existe déjà
+  const checkSql = "SELECT idFav FROM annonce_favorise WHERE idAnnonce = ? AND userId = ?";
+  db.query(checkSql, [idAnnonce, userId], (err, results) => {
+    if (err) {
+      console.error("Erreur SQL check :", err);
+      return res.status(500).json({ message: "Erreur serveur", error: err.message });
+    }
+
+    if (results.length > 0) {
+      // Le favori existe déjà
+      return res.status(200).json({ message: "Annonce déjà en favoris", idFav: results[0].idFav });
+    }
+
+    // Sinon, on ajoute le favori
+    const insertSql = "INSERT INTO annonce_favorise (idAnnonce, userId, dateAjout) VALUES (?, ?, NOW())";
+    db.query(insertSql, [idAnnonce, userId], (err, result) => {
+      if (err) {
+        console.error("Erreur SQL insert :", err);
+        return res.status(500).json({ message: "Erreur serveur", error: err.message });
+      }
+
+      res.status(201).json({ message: "Ajouté aux favoris", idFav: result.insertId });
+    });
+  });
+});
+
+
+
+// 5. Supprimer une annonce des favoris
+app.delete("/api/favoris/:idFav", (req, res) => {
+  const { idFav } = req.params;
+  const sql = "DELETE FROM annonce_favorise WHERE idFav = ?";
+  db.query(sql, [idFav], (err, results) => {
+    if (err) return res.status(500).json({ error: err });
+    res.json({ message: "Supprimé des favoris" });
+  });
+});
+
+// Vérifier si l'annonce est déjà dans les favoris pour l'utilisateur
+app.get("/api/favoris/check", (req, res) => {
+  const { idAnnonce, userId } = req.query;
+  const sql = "SELECT idFav FROM annonce_favorise WHERE idAnnonce = ? AND userId = ?";
+  db.query(sql, [idAnnonce, userId], (err, results) => {
+    if (err) return res.status(500).json({ error: err });
+    if (results.length > 0) return res.json({ idFav: results[0].idFav });
+    res.json({ idFav: null });
+  });
+});
+
+// 4. Récupérer les favoris d’un utilisateur
+// backend - route pour récupérer les favoris d'un utilisateur
+app.get("/api/favoris/:userId", (req, res) => {
+  const { userId } = req.params;
+
+  if (!userId) {
+    return res.status(400).json({ error: "userId manquant" });
+  }
+
+  const sql = `
+    SELECT af.idFav, af.idAnnonce, af.dateAjout, a.titre, a.prix, a.type, a.localisation, a.image
+    FROM annonce_favorise af
+    JOIN annonce a ON af.idAnnonce = a.idAnnonce
+    WHERE af.userId = ?`;
+
+  db.query(sql, [userId], (err, results) => {
+    if (err) {
+      console.error("Erreur SQL favoris :", err);
+      return res.status(500).json({ error: "Erreur serveur lors de la récupération des favoris" });
+    }
+
+    res.json(results);
+  });
+});
+
+
 app.get("/getAnnonces", (req, res) => {
   db.query("SELECT * FROM annonce", (err, results) => {
     if (err) {
@@ -542,7 +637,9 @@ const upload = multer({
 });
 
 // rendre uploads accessible publiquement
-app.use("/uploads", express.static(uploadDir));
+
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
 
 // Ex: route pour uploader une image de profil
 app.post(
