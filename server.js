@@ -200,6 +200,41 @@ app.get("/get/3dernierAnnonces", (req, res) => {
   );
 });
 
+app.post("/api/demandeloc", (req, res) => {
+  const { annonceId, userId } = req.body;
+  const dateDem = new Date();
+
+  const sql = `
+    INSERT INTO demandeloc (annonceId, userId, dateDem, statut)
+    VALUES (?, ?, ?, 'en attente')
+  `;
+  db.query(sql, [annonceId, userId, dateDem], (err, result) => {
+    if (err) {
+      console.error("Erreur insertion demande :", err);
+      return res.status(500).json({ message: "Erreur lors de la demande" });
+    }
+    res.status(200).json({ idDem: result.insertId });
+  });
+});
+
+
+app.post("/api/notifications", (req, res) => {
+  const { titre, message, typeNotification, userId, messageId } = req.body;
+  const dateCreation = new Date();
+
+  const sql = `
+    INSERT INTO notification 
+    (titre, message, typeNotification, dateCreation, lu, userId)
+    VALUES (?, ?, ?, ?, 0, ?)
+  `;
+  db.query(sql, [titre, message, typeNotification, dateCreation, userId, messageId], (err) => {
+    if (err) {
+      console.error("Erreur insertion notification :", err);
+      return res.status(500).json({ message: "Erreur notification" });
+    }
+    res.status(200).json({ message: "Notification ajoutée" });
+  });
+});
 //  Get nombre des annonces actives
 app.get("/get/NombreAnnoncesActives/:userId", (req, res) => {
   const userId = req.params.userId;
@@ -601,7 +636,7 @@ app.post("/api/annonces", (req, res) => {
 
 // dossier uploads (crée le si n'existe pas)
 const uploadDir = path.join(
-  "/home/achwak/projetdariTn/projet_nodejs",
+  "/home/rahma/projet_nodejs",
   "uploads"
 );
 
