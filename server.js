@@ -1602,7 +1602,7 @@ app.post("/api/agences/:id/contact", (req, res) => {
 });
 
 // ✏️ Mettre à jour le profil agence (protégé)
-app.put("/api/agences/profile/:id", (req, res) => {
+/*app.put("/api/agences/profile/:id", (req, res) => {
   const agenceId = req.params.id;
   const { nom, prénom, telephone } = req.body;
 
@@ -1670,61 +1670,248 @@ db.query(createContactAgenceTable, (err) => {
     console.log("✅ Table contact_agence vérifiée/créée");
   }
 });
-
+*/
 // =============================================
 // 📊 STATISTIQUES POUR LES AGENCES
 // =============================================
+// =============================================
+// 🔔 NOTIFICATIONS POUR LE PROPRIÉTAIRE SEULEMENT
+// =============================================
 
-// 📈 Récupérer les statistiques d'une agence
-app.get("/api/agences/:id/stats", (req, res) => {
-  const agenceId = req.params.id;
+// 📱 Récupérer les notifications de l'utilisateur connecté (propriétaire)
+app.get("/api/mes-notifications", (req, res) => {
+  // Récupérer l'userId depuis le token ou les paramètres
+  const userId = req.query.userId || req.body.userId;
+  
+  if (!userId) {
+    return res.status(400).json({ error: "userId requis" });
+  }
+  
+  const sql = `
+    SELECT 
+      n.idNotification,
+      n.titre,
+      n.message,
+      n.typeNotification,
+      n.dateCreation,
+      n.lu,
+      n.userId,
+      n.messageId
+    FROM notification n
+    WHERE n.userId = ? 
+    ORDER BY n.dateCreation DESC
+  `;
+  
+  db.query(sql, [userId], (err, results) => {
+    if (err) {
+      console.error("Erreur récupération notifications:", err);
+      return res.status(500).json({ error: "Erreur récupération notifications" });
+    }
+    
+    console.log(`📨 ${results.length} notifications récupérées pour l'utilisateur ${userId}`);
+    res.json(results);
+  });
+});
 
-  const statsQueries = {
-    annoncesActives: `
-      SELECT COUNT(*) as count FROM annonce 
-      WHERE userId = ? AND statu = 'ACTIVE'
-    `,
-    annoncesInactives: `
-      SELECT COUNT(*) as count FROM annonce 
-      WHERE userId = ? AND statu = 'INACTIVE'
-    `,
-    demandesClients: `
-      SELECT COUNT(*) as count FROM demandeloc d
-      INNER JOIN annonce a ON d.annonceId = a.idAnnonce
-      WHERE a.userId = ?
-    `,
-    contactsRecus: `
-      SELECT COUNT(*) as count FROM contact_agence 
-      WHERE agenceId = ?
-    `
-  };
+// 🔔 Nombre de notifications non lues pour le propriétaire
+app.get("/api/mes-notifications/non-lues", (req, res) => {
+  const userId = req.query.userId;
+  
+  if (!userId) {
+    return res.status(400).json({ error: "userId requis" });
+  }
+  
+  const sql = `
+    SELECT COUNT(*) as count 
+    FROM notification 
+    WHERE userId = ? AND lu = 0
+  `;
+  
+  db.query(sql, [userId], (err, results) => {
+    if (err) {
+      console.error("Erreur comptage notifications:", err);
+      return res.status(500).json({ error: "Erreur comptage notifications" });
+    }
+    
+    res.json({ count: results[0].count });
+  });
+});
 
-  const stats = {};
-  let completedQueries = 0;
-  const totalQueries = Object.keys(statsQueries).length;
+// ✅ Marquer une notification comme lue
+app.put("/api/mes-notifications/:id/lu", (req, res) => {
+  const notificationId = req.params.id;
+  const userId = req.body.userId;
+  
+  const sql = "UPDATE notification SET lu = 1 WHERE idNotification = ? AND userId = ?";
+  
+  db.query(sql, [notificationId, userId], (err, result) => {
+    if (err) {
+      console.error("Erreur marquer comme lu:", err);
+      return res.status(500).json({ error: "Erreur mise à jour notification" });
+    }
+    
+    res.json({ success: true, message: "Notification marquée comme lue" });
+  });
+});
 
-  Object.keys(statsQueries).forEach((key) => {
-    db.query(statsQueries[key], [agenceId], (err, results) => {
+// 🗑️ Supprimer une notification
+app.delete("/api/mes-notifications/:id", (req, res) => {
+  const notificationId = req.params.id;
+  const userId = req.body.userId;
+  
+  const sql = "DELETE FROM notification WHERE idNotification = ? AND userId = ?";
+  
+  db.query(sql, [notificationId, userId], (err, result) => {
+    if (err) {
+      console.error("Erreur suppression notification:", err);
+      return res.status(500).json({ error: "Erreur suppression notification" });
+    }
+    
+    res.json({ success: true, message: "Notification supprimée" });
+  });
+});
+
+// =============================================
+// 🔄 CRÉATION DE NOTIFICATIONS POUR LE PROPRIÉTAIRE
+// =============================================
+
+// Fonction pour créer des notifications pour le propriétaire
+const creerNotificationProprietaire = (userId, titre, message, typeNotification) => {
+  const sql = `
+    INSERT INTO notification (titre, message, typeNotification, userId) 
+    VALUES (?, ?, ?, ?)
+  `;
+  
+  db.query(sql, [titre, message, typeNotification, userId], (err, result) => {
+    if (err) {
+      console.error("❌ Erreur création notification propriétaire:", err);
+    } else {
+      console.log(`✅ Notification créée pour propriétaire ${userId}: ${titre}`);
+    }
+  });
+};
+
+// Exemple: Quand un client envoie un message au propriétaire
+app.post("/api/messages", (req, res) => {
+  const { contenu, expediteurId, destinataireId } = req.body;
+  
+  if (!contenu || !expediteurId || !destinataireId) {
+    return res.status(400).json({ error: "Contenu, expediteurId et destinataireId sont requis" });
+  }
+  
+  const sql = `
+    INSERT INTO message (contenu, expediteurId, destinataireId, dateEnv, lu) 
+    VALUES (?, ?, ?, NOW(), 0)
+  `;
+  
+  db.query(sql, [contenu, expediteurId, destinataireId], (err, result) => {
+    if (err) {
+      console.error("❌ Erreur envoi message:", err);
+      return res.status(500).json({ error: "Erreur envoi message" });
+    }
+
+    const messageId = result.insertId;
+    
+    // Récupérer les infos de l'expéditeur (client)
+    const getExpediteurSql = "SELECT nom, prénom FROM utilisateur WHERE userId = ?";
+    
+    db.query(getExpediteurSql, [expediteurId], (err, expediteurResults) => {
       if (err) {
-        console.error(`❌ Erreur statistique ${key}:`, err);
-        stats[key] = 0;
-      } else {
-        stats[key] = results[0].count;
-      }
-
-      completedQueries++;
-      
-      if (completedQueries === totalQueries) {
-        console.log("✅ Statistiques agence récupérées:", stats);
-        res.json({
-          success: true,
-          data: stats
+        console.error("❌ Erreur récupération expéditeur:", err);
+        return res.json({ 
+          success: true, 
+          message: "Message envoyé avec succès"
         });
       }
+
+      if (expediteurResults.length > 0) {
+        const expediteur = expediteurResults[0];
+        const nomComplet = `${expediteur.nom} ${expediteur.prénom}`;
+        
+        // Créer une notification pour le PROPRIÉTAIRE (destinataire)
+        creerNotificationProprietaire(
+          destinataireId,
+          "Nouveau Message 💬",
+          `${nomComplet} vous a envoyé un message: "${contenu.substring(0, 50)}${contenu.length > 50 ? '...' : ''}"`,
+          'message'
+        );
+      }
+
+      res.json({ 
+        success: true, 
+        message: "Message envoyé avec succès"
+      });
     });
   });
 });
 
+// Exemple: Quand une nouvelle demande est faite sur votre annonce
+app.post("/api/demandes", (req, res) => {
+  const { annonceId, userId: clientId, datedebut, dateFin } = req.body;
+  
+  // Récupérer le propriétaire de l'annonce
+  const getProprietaireSql = "SELECT userId FROM annonce WHERE idAnnonce = ?";
+  
+  db.query(getProprietaireSql, [annonceId], (err, results) => {
+    if (err) {
+      console.error("❌ Erreur récupération propriétaire:", err);
+      return res.status(500).json({ error: "Erreur création demande" });
+    }
+
+    if (results.length === 0) {
+      return res.status(404).json({ error: "Annonce non trouvée" });
+    }
+
+    const proprietaireId = results[0].userId;
+    
+    // Créer la demande
+    const createDemandeSql = `
+      INSERT INTO demandeloc (dateDem, datedebut, dateFin, userId, annonceId, statut) 
+      VALUES (NOW(), ?, ?, ?, ?, 'en attente')
+    `;
+    
+    db.query(createDemandeSql, [datedebut, dateFin, clientId, annonceId], (err, result) => {
+      if (err) {
+        console.error("❌ Erreur création demande:", err);
+        return res.status(500).json({ error: "Erreur création demande" });
+      }
+
+      // Récupérer les infos du client
+      const getClientSql = "SELECT nom, prénom FROM utilisateur WHERE userId = ?";
+      
+      db.query(getClientSql, [clientId], (err, clientResults) => {
+        if (err) {
+          console.error("❌ Erreur récupération client:", err);
+          return res.json({ 
+            success: true, 
+            message: "Demande créée avec succès"
+          });
+        }
+
+        if (clientResults.length > 0) {
+          const client = clientResults[0];
+          const nomComplet = `${client.nom} ${client.prénom}`;
+          
+          // Créer une notification pour le PROPRIÉTAIRE
+          creerNotificationProprietaire(
+            proprietaireId,
+            "Nouvelle Demande 📋",
+            `${nomComplet} a fait une demande de location sur votre annonce`,
+            'nouvelle_demande'
+          );
+        }
+
+        res.json({ 
+          success: true, 
+          message: "Demande créée avec succès",
+          demandeId: result.insertId
+        });
+      });
+    });
+  });
+});
+
+console.log("✅ Routes notifications propriétaire configurées");
 console.log("✅ Routes agences et contact ajoutées avec succès");
 app.listen(PORT, () =>
   console.log(`🚀 Serveur démarré sur http://localhost:${PORT}`)
