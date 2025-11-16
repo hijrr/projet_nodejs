@@ -600,12 +600,13 @@ app.post("/api/annonces", (req, res) => {
 
 
 // dossier uploads (crée le si n'existe pas)
-const uploadDir = path.join(
+/* const uploadDir = path.join(
   "/home/achwak/projetdariTn/projet_nodejs",
   "uploads"
-);
+); */
 
-// eye: C:\licence\s5\projet d'integrration\projet_nodejs
+// eye:  const uploadDir = path.join(__dirname, "uploads");
+const uploadDir = path.join(__dirname, "uploads");
 // dossier uploads (crée le si n'existe pas)
 
 
@@ -666,9 +667,7 @@ app.post(
 
 const PORT = 5000;
 
-app.listen(PORT, () =>
-  console.log(`🚀 Serveur démarré sur http://localhost:${PORT}`)
-);
+
 
 app.get("/api/stats", async (req, res) => {
   try {
@@ -782,18 +781,34 @@ app.put("/annonces/:id", (req, res) => {
 });
 
 /* 🗑️ 3. Supprimer une annonce */
-app.delete("/annonces/:id", (req, res) => {
+app.delete("/annoncesDelite/:id", (req, res) => {
   const { id } = req.params;
 
   const sql = "DELETE FROM annonce WHERE idAnnonce = ?";
   db.query(sql, [id], (err, result) => {
     if (err) {
       console.error("Erreur suppression :", err);
+
+      // Cas particulier : violation de contrainte de clé étrangère
+      if (err.errno === 1451) {
+        return res.status(400).json({
+          message:
+            "Impossible de supprimer cette annonce car elle est liée à une ou plusieurs demandes de location.",
+        });
+      }
+
+      // Autres erreurs
       return res.status(500).json({ message: "Erreur serveur" });
     }
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ message: "Annonce non trouvée" });
+    }
+
     res.json({ message: "Annonce supprimée avec succès" });
   });
 });
+
 
 // Route pour supprimer une annonce
 app.delete("/api/annonces/:id", (req, res) => {
@@ -980,12 +995,12 @@ app.post(
 app.put("/demandes/:id/accepter", async (req, res) => {
   try {
     const demandeId = req.params.id;
-    
+
     console.log("🟢 Acceptation demande ID:", demandeId);
 
     // 1. Mettre à jour le statut de la demande
     const updateDemandeSql = "UPDATE demandeloc SET statut = 'accepte' WHERE idDem = ?";
-    
+
     db.query(updateDemandeSql, [demandeId], async (err, result) => {
       if (err) {
         console.error("❌ Erreur mise à jour demande:", err);
@@ -1013,7 +1028,7 @@ app.put("/demandes/:id/accepter", async (req, res) => {
         INNER JOIN utilisateur u_client ON d.userId = u_client.userId
         WHERE d.idDem = ?
       `;
-      
+
       db.query(getDemandeSql, [demandeId], async (err, demandeResults) => {
         if (err) {
           console.error("❌ Erreur récupération infos demande:", err);
@@ -1025,7 +1040,7 @@ app.put("/demandes/:id/accepter", async (req, res) => {
         }
 
         const demandeInfo = demandeResults[0];
-        
+
         console.log("📧 Création message et notification pour:", {
           client: `${demandeInfo.client_nom} ${demandeInfo.client_prenom}`,
           annonce: demandeInfo.titre
@@ -1033,12 +1048,12 @@ app.put("/demandes/:id/accepter", async (req, res) => {
 
         // 3. Créer un message automatique
         const messageContenu = `🎉 Félicitations ! Votre demande pour "${demandeInfo.titre}" a été acceptée par ${demandeInfo.proprio_nom} ${demandeInfo.proprio_prenom}. Contactez le propriétaire pour finaliser les détails.`;
-        
+
         const insertMessageSql = `
           INSERT INTO message (contenu, expediteurId, destinataireId, dateEnv, lu) 
           VALUES (?, ?, ?, NOW(), 0)
         `;
-        
+
         db.query(
           insertMessageSql,
           [
@@ -1056,12 +1071,12 @@ app.put("/demandes/:id/accepter", async (req, res) => {
             // 4. Créer une notification pour le client
             const notificationTitre = "Demande Acceptée ✅";
             const notificationMessage = `Votre demande pour "${demandeInfo.titre}" a été acceptée !`;
-            
+
             const insertNotificationSql = `
               INSERT INTO notification (titre, message, typeNotification, userId, dateCreation, lu) 
               VALUES (?, ?, ?, ?, NOW(), 0)
             `;
-            
+
             db.query(
               insertNotificationSql,
               [
@@ -1077,8 +1092,8 @@ app.put("/demandes/:id/accepter", async (req, res) => {
                   console.log("✅ Notification créée ID:", notificationResult.insertId);
                 }
 
-                res.json({ 
-                  success: true, 
+                res.json({
+                  success: true,
                   message: 'Demande acceptée avec succès'
                 });
               }
@@ -1098,11 +1113,11 @@ app.put("/demandes/:id/refuser", async (req, res) => {
   try {
     const demandeId = req.params.id;
     const { raison } = req.body;
-    
+
     console.log("🔴 Refus demande ID:", demandeId, "Raison:", raison);
 
     const updateDemandeSql = "UPDATE demandeloc SET statut = 'refuse' WHERE idDem = ?";
-    
+
     db.query(updateDemandeSql, [demandeId], async (err, result) => {
       if (err) {
         console.error("❌ Erreur mise à jour demande:", err);
@@ -1129,7 +1144,7 @@ app.put("/demandes/:id/refuser", async (req, res) => {
         INNER JOIN utilisateur u_client ON d.userId = u_client.userId
         WHERE d.idDem = ?
       `;
-      
+
       db.query(getDemandeSql, [demandeId], async (err, demandeResults) => {
         if (err) {
           console.error("❌ Erreur récupération infos demande:", err);
@@ -1142,15 +1157,15 @@ app.put("/demandes/:id/refuser", async (req, res) => {
 
         const demandeInfo = demandeResults[0];
         const messageRaison = raison ? `\n\nRaison: ${raison}` : '';
-        
+
         // 3. Créer un message automatique
         const messageContenu = `❌ Votre demande pour "${demandeInfo.titre}" a été refusée par ${demandeInfo.proprio_nom} ${demandeInfo.proprio_prenom}.${messageRaison}`;
-        
+
         const insertMessageSql = `
           INSERT INTO message (contenu, expediteurId, destinataireId, dateEnv, lu) 
           VALUES (?, ?, ?, NOW(), 0)
         `;
-        
+
         db.query(
           insertMessageSql,
           [
@@ -1166,12 +1181,12 @@ app.put("/demandes/:id/refuser", async (req, res) => {
             // 4. Créer une notification pour le client
             const notificationTitre = "Demande Refusée ❌";
             const notificationMessage = `Votre demande pour "${demandeInfo.titre}" a été refusée.`;
-            
+
             const insertNotificationSql = `
               INSERT INTO notification (titre, message, typeNotification, userId, dateCreation, lu) 
               VALUES (?, ?, ?, ?, NOW(), 0)
             `;
-            
+
             db.query(
               insertNotificationSql,
               [
@@ -1185,8 +1200,8 @@ app.put("/demandes/:id/refuser", async (req, res) => {
                   console.error("❌ Erreur création notification:", err);
                 }
 
-                res.json({ 
-                  success: true, 
+                res.json({
+                  success: true,
                   message: 'Demande refusée avec succès'
                 });
               }
@@ -1204,16 +1219,16 @@ app.put("/demandes/:id/refuser", async (req, res) => {
 // 📱 API pour envoyer un message avec notification
 app.post("/api/messages", (req, res) => {
   const { contenu, expediteurId, destinataireId } = req.body;
-  
+
   if (!contenu || !expediteurId || !destinataireId) {
     return res.status(400).json({ error: "Contenu, expediteurId et destinataireId sont requis" });
   }
-  
+
   const sql = `
     INSERT INTO message (contenu, expediteurId, destinataireId, dateEnv, lu) 
     VALUES (?, ?, ?, NOW(), 0)
   `;
-  
+
   db.query(sql, [contenu, expediteurId, destinataireId], (err, result) => {
     if (err) {
       console.error("❌ Erreur envoi message:", err);
@@ -1221,39 +1236,39 @@ app.post("/api/messages", (req, res) => {
     }
 
     const messageId = result.insertId;
-    
+
     // Récupérer les infos de l'expéditeur pour la notification
     const getExpediteurSql = "SELECT nom, prénom FROM utilisateur WHERE userId = ?";
-    
+
     db.query(getExpediteurSql, [expediteurId], (err, expediteurResults) => {
       if (err) {
         console.error("❌ Erreur récupération expéditeur:", err);
-        return res.json({ 
-          success: true, 
+        return res.json({
+          success: true,
           message: "Message envoyé avec succès",
           messageId: messageId
         });
       }
 
       if (expediteurResults.length === 0) {
-        return res.json({ 
-          success: true, 
+        return res.json({
+          success: true,
           message: "Message envoyé avec succès",
           messageId: messageId
         });
       }
       const expediteur = expediteurResults[0];
       const nomComplet = `${expediteur.nom} ${expediteur.prénom}`;
-      
+
       // Créer la notification pour le destinataire
       const notificationTitre = "Nouveau Message 💬";
       const notificationMessage = `${nomComplet} vous a envoyé un message: "${contenu.substring(0, 50)}${contenu.length > 50 ? '...' : ''}"`;
-      
+
       const insertNotificationSql = `
         INSERT INTO notification (titre, message, typeNotification, userId, messageId, dateCreation, lu) 
         VALUES (?, ?, ?, ?, ?, NOW(), 0)
       `;
-      
+
       db.query(
         insertNotificationSql,
         [
@@ -1268,8 +1283,8 @@ app.post("/api/messages", (req, res) => {
             console.error("❌ Erreur création notification:", err);
           }
 
-          res.json({ 
-            success: true, 
+          res.json({
+            success: true,
             message: "Message envoyé avec succès",
             messageId: messageId
           });
@@ -1283,7 +1298,7 @@ app.post("/api/messages", (req, res) => {
 app.get("/api/messages/:userId1/:userId2", (req, res) => {
   const userId1 = req.params.userId1;
   const userId2 = req.params.userId2;
-  
+
   const sql = `
     SELECT 
       m.*,
@@ -1295,13 +1310,13 @@ app.get("/api/messages/:userId1/:userId2", (req, res) => {
        OR (m.expediteurId = ? AND m.destinataireId = ?)
     ORDER BY m.dateEnv ASC
   `;
-  
+
   db.query(sql, [userId1, userId2, userId2, userId1], (err, results) => {
     if (err) {
       console.error("❌ Erreur récupération messages:", err);
       return res.status(500).json({ error: "Erreur récupération messages" });
     }
-    
+
     res.json(results);
   });
 });
@@ -1309,20 +1324,20 @@ app.get("/api/messages/:userId1/:userId2", (req, res) => {
 // 📱 API pour récupérer les notifications
 app.get("/api/notifications/:userId", (req, res) => {
   const userId = req.params.userId;
-  
+
   const sql = `
     SELECT * FROM notification 
     WHERE userId = ? 
     ORDER BY dateCreation DESC
     LIMIT 50
   `;
-  
+
   db.query(sql, [userId], (err, results) => {
     if (err) {
       console.error("❌ Erreur récupération notifications:", err);
       return res.status(500).json({ error: "Erreur récupération notifications" });
     }
-    
+
     res.json(results);
   });
 });
@@ -1361,6 +1376,106 @@ app.get("/getOffres", (req, res) => {
   });
 });
 
+
+// 🔹 Récupérer toutes les offres
+app.get("/api/offres", (req, res) => {
+  db.query("SELECT * FROM offre", (err, results) => {
+    if (err) return res.status(500).json({ error: err });
+    res.json(results);
+  });
+});
+
+// 🔹 Supprimer une offre
+app.delete("/api/offresSupp/:idOff", (req, res) => {
+  const idOff = req.params.idOff;
+  db.query("DELETE FROM offre WHERE idOff = ?", [idOff], (err) => {
+    if (err) return res.status(500).json({ error: err });
+    res.json({ message: "Offre supprimée avec succès" });
+  });
+});
+
+app.get("/api/offres/:idOff", (req, res) => {
+  const idOff = parseInt(req.params.idOff, 10);
+  db.query("SELECT * FROM offre WHERE idOff = ?", [idOff], (err, results) => {
+    if (err) return res.status(500).json({ error: err });
+    if (results.length === 0) return res.status(404).json({ message: "Offre introuvable" });
+    res.json(results[0]);
+  });
+});
+// 🔹 Ajouter une offre
+app.post('/api/offres/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params; // récupère l'userId depuis l'URL
+    const { titre, description, prix, dureeOffre, date_fin } = req.body;
+
+    // Vérifications de base
+    if (!userId) {
+      return res.status(400).json({ message: "userId manquant dans l'URL" });
+    }
+
+    if (!titre || !description || !prix || !dureeOffre || !date_fin) {
+      return res.status(400).json({ message: "Tous les champs sont obligatoires" });
+    }
+
+    // Insertion dans la table offre
+    const insertOffreQuery = `
+      INSERT INTO offre (titre, description, prix, dureeOffre, date_fin, dateCreation)
+      VALUES (?, ?, ?, ?, ?, NOW())
+    `;
+    const [result] = await db.promise().query(insertOffreQuery, [
+      titre,
+      description,
+      prix,
+      dureeOffre,
+      date_fin,
+    ]);
+
+    const offreId = result.insertId;
+
+    // Insertion dans la table pivot utilisateur_offre
+    const insertRelationQuery = `
+      INSERT INTO utilisateur_offre (userId, idOff)
+      VALUES (?, ?)
+    `;
+    await db.promise().query(insertRelationQuery, [userId, offreId]);
+
+    res.status(201).json({ message: "Offre ajoutée avec succès", offreId });
+
+  } catch (err) {
+    console.error("Erreur ajout offre:", err);
+    res.status(500).json({ message: "Erreur serveur" });
+  }
+});
+
+
+
+app.put("/api/offresModff/:idOff", (req, res) => {
+  const { idOff } = req.params;
+  const { titre, description, prix, dureeOffre, date_fin } = req.body;
+
+  if (!titre || !description || !prix || !dureeOffre || !date_fin) {
+    return res.status(400).json({ message: "Tous les champs sont obligatoires" });
+  }
+
+  const dateCreation = new Date();
+  const dateFin = new Date(date_fin);
+  const moisDiff = (dateFin.getFullYear() - dateCreation.getFullYear()) * 12 +
+    (dateFin.getMonth() - dateCreation.getMonth());
+
+  if (parseInt(dureeOffre) > moisDiff) {
+    return res.status(400).json({ message: `Durée maximale: ${moisDiff} mois` });
+  }
+
+  const sql = "UPDATE offre SET titre=?, description=?, prix=?, dureeOffre=?, date_fin=? WHERE idOff=?";
+  db.query(sql, [titre, description, prix, dureeOffre, date_fin, idOff], (err) => {
+    if (err) return res.status(500).json({ error: err });
+    res.json({ message: "Offre modifiée avec succès" });
+  });
+
+});
+
+
+
 app.listen(PORT, () =>
-  console.log(`🚀 Serveur démarré sur http://localhost:${PORT}`)
+  console.log(` Serveur démarré sur http://localhost:${PORT}`)
 );
