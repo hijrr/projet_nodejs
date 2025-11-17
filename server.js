@@ -524,6 +524,7 @@ app.post("/api/annonces", (req, res) => {
         return res.status(500).json({ message: "Erreur d’ajout de l’annonce" });
       }
       res.status(201).json({ message: "Annonce ajoutée avec succès" });
+      
     }
   );
 });
@@ -808,12 +809,27 @@ app.put("/annonces/:id", (req, res) => {
   const sql = "UPDATE annonce SET statu = ? WHERE idAnnonce = ?";
   db.query(sql, [statu, id], (err, result) => {
     if (err) {
-      console.error("Erreur update :", err);
+      console.error("Erreur update annonce :", err);
       return res.status(500).json({ message: "Erreur serveur" });
     }
-    res.json({ message: "Statut modifié avec succès" });
+
+    if (statu === "ACTIVE") {
+      console.log("🔹 Mise à jour notifications liées à l'annonce :", id);
+      const sqlUpdateNotif = "UPDATE notification SET lu = 1 WHERE annonceId = ?";
+      db.query(sqlUpdateNotif, [id], (err2, result2) => {
+        if (err2) {
+          console.error("Erreur update notifications :", err2);
+          return res.status(500).json({ message: "Erreur serveur" });
+        }
+        console.log("✅ Notifications mises à jour :", result2.affectedRows);
+        return res.json({ message: "Statut de l'annonce et notifications mises à jour avec succès" });
+      });
+    } else {
+      return res.json({ message: "Statut de l'annonce mis à jour avec succès" });
+    }
   });
 });
+
 
 /* 🗑️ 3. Supprimer une annonce */
 app.delete("/annoncesDelite/:id", (req, res) => {
@@ -957,6 +973,21 @@ app.put("/api/annonces/:id", (req, res) => {
     );
   });
 });
+app.put("/api/annonces/:id/status", (req, res) => {
+  const idAnnonce = req.params.id;
+  const { statu } = req.body; // doit correspondre à ce que tu envoies
+
+  const sql = "UPDATE annonce SET statu = ? WHERE idAnnonce = ?";
+  db.query(sql, [statu, idAnnonce], (err, result) => {
+    if (err) {
+      console.error("Erreur de mise à jour du statut :", err);
+      return res.status(500).json({ message: "Erreur serveur" });
+    }
+    res.json({ message: "Statut mis à jour avec succès" });
+  });
+});
+
+
 const path2 = require("path");
 const fs2 = require("fs");
 const multer2 = require("multer");
@@ -1419,6 +1450,7 @@ app.get("/getOffres", (req, res) => {
 app.get("/api/offres", (req, res) => {
   db.query("SELECT * FROM offre", (err, results) => {
     if (err) return res.status(500).json({ error: err });
+    res.json(results); 
   });
 });
 
@@ -1795,27 +1827,27 @@ app.get("/api/offres/:idOff", (req, res) => {
 app.post('/api/offres/:userId', async (req, res) => {
   try {
     const { userId } = req.params; // récupère l'userId depuis l'URL
-    const { titre, description, prix, dureeOffre, date_fin } = req.body;
+    const { titre, description, prix, nb_annonces, date_fin } = req.body;
 
     // Vérifications de base
     if (!userId) {
       return res.status(400).json({ message: "userId manquant dans l'URL" });
     }
 
-    if (!titre || !description || !prix || !dureeOffre || !date_fin) {
+    if (!titre || !description || !prix || !nb_annonces || !date_fin) {
       return res.status(400).json({ message: "Tous les champs sont obligatoires" });
     }
 
     // Insertion dans la table offre
     const insertOffreQuery = `
-      INSERT INTO offre (titre, description, prix, dureeOffre, date_fin, dateCreation)
+      INSERT INTO offre (titre, description, prix, nb_annonces, date_fin, dateCreation)
       VALUES (?, ?, ?, ?, ?, NOW())
     `;
     const [result] = await db.promise().query(insertOffreQuery, [
       titre,
       description,
       prix,
-      dureeOffre,
+      nb_annonces,
       date_fin,
     ]);
 
@@ -1840,9 +1872,9 @@ app.post('/api/offres/:userId', async (req, res) => {
 
 app.put("/api/offresModff/:idOff", (req, res) => {
   const { idOff } = req.params;
-  const { titre, description, prix, dureeOffre, date_fin } = req.body;
+  const { titre, description, prix, nb_annonces, date_fin } = req.body;
 
-  if (!titre || !description || !prix || !dureeOffre || !date_fin) {
+  if (!titre || !description || !prix || !nb_annonces || !date_fin) {
     return res.status(400).json({ message: "Tous les champs sont obligatoires" });
   }
 
@@ -1851,12 +1883,10 @@ app.put("/api/offresModff/:idOff", (req, res) => {
   const moisDiff = (dateFin.getFullYear() - dateCreation.getFullYear()) * 12 +
     (dateFin.getMonth() - dateCreation.getMonth());
 
-  if (parseInt(dureeOffre) > moisDiff) {
-    return res.status(400).json({ message: `Durée maximale: ${moisDiff} mois` });
-  }
+ 
 
-  const sql = "UPDATE offre SET titre=?, description=?, prix=?, dureeOffre=?, date_fin=? WHERE idOff=?";
-  db.query(sql, [titre, description, prix, dureeOffre, date_fin, idOff], (err) => {
+  const sql = "UPDATE offre SET titre=?, description=?, prix=?, nb_annonces=?, date_fin=? WHERE idOff=?";
+  db.query(sql, [titre, description, prix, nb_annonces, date_fin, idOff], (err) => {
     if (err) return res.status(500).json({ error: err });
     res.json({ message: "Offre modifiée avec succès" });
   });
@@ -2063,6 +2093,31 @@ app.post("/api/demandes", (req, res) => {
     });
   });
 });
+
+app.get("/api/notifications/:userId", (req, res) => {
+  const { userId } = req.params;
+  const sql = `
+    SELECT n.*, a.statu
+    FROM notification n
+    LEFT JOIN annonce a ON n.annonceId = a.idAnnonce
+    WHERE n.userId = ? and n.lu = 0
+    ORDER BY n.dateCreation DESC
+  `;
+  db.query(sql, [userId], (err, result) => {
+    if (err) return res.status(500).json({ message: "Erreur serveur" });
+    res.json(result);
+  });
+});
+// Marquer la notification comme lue
+app.put("/api/notifications/:id/read", (req, res) => {
+  const { id } = req.params;
+  const sql = "UPDATE notification SET lu = 1 WHERE idNotification = ?";
+  db.query(sql, [id], (err, result) => {
+    if (err) return res.status(500).json({ message: "Erreur serveur" });
+    res.json({ message: "Notification marquée comme lue" });
+  });
+});
+
 
 console.log("✅ Routes notifications propriétaire configurées");
 console.log("✅ Routes agences et contact ajoutées avec succès");
