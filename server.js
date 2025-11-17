@@ -175,6 +175,39 @@ app.get("/api/favoris/:userId", (req, res) => {
 });
 
 
+// Vérifier si une demande a été acceptée pour une annonce donnée
+app.get("/api/demandes/etat", (req, res) => {
+  const { userId, annonceId } = req.query;
+
+  if (!userId || !annonceId) {
+    return res.status(400).json({ error: "Paramètres manquants" });
+  }
+
+  const sql = `
+    SELECT statut 
+    FROM demandeloc 
+    WHERE userId = ? AND annonceId = ?
+    ORDER BY dateDem DESC
+    LIMIT 1
+  `;
+
+  db.query(sql, [userId, annonceId], (err, results) => {
+    if (err) {
+      console.error(err);
+      return res.status(500).json({ error: "Erreur serveur" });
+    }
+
+    if (results.length === 0) {
+      return res.json({ etat: null });
+    }
+
+    return res.json({ etat: results[0].statut });
+  });
+});
+
+
+
+
 app.get("/getAnnonces", (req, res) => {
   db.query("SELECT * FROM annonce", (err, results) => {
     if (err) {
