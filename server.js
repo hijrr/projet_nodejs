@@ -293,7 +293,16 @@ app.get("/api/demandes/etat", (req, res) => {
   });
 });
 
-
+app.get("/getAnnoncesActif", (req, res) => {
+  db.query("SELECT * FROM annonce where statu='ACTIVE'", (err, results) => {
+    if (err) {
+      console.error("Erreur requête :", err);
+      return res.status(500).json(err);
+    }
+    console.log("✅ Résultat de la requête :", results);
+    res.json(results);
+  });
+});
 
 
 app.get("/getAnnonces", (req, res) => {
