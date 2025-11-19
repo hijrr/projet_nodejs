@@ -6,6 +6,9 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 app.use(cors());
+const crypto = require("crypto");
+const nodemailer = require("nodemailer");
+
 app.use(express.json()); //permet serveur de comprendre les fichiers json de front-end
 // Connexion à la base de données AlwaysData
 const db = mysql.createConnection({
@@ -54,30 +57,115 @@ app.get("/api/utilisateur/connecte/:userId", (req, res) => {
   });
 });
 
-// --- Mettre à jour le profil utilisateur ---
+
+// Ajouter cette route pour vérifier si l'email existe
+app.get("/api/utilisateur/email/:email", (req, res) => {
+  const email = req.params.email;
+  
+  db.query("SELECT * FROM utilisateur WHERE email = ?", [email], (err, results) => {
+    if (err) {
+      console.error("Erreur vérification email:", err);
+      return res.status(500).json({ message: "Erreur serveur" });
+    }
+    
+    if (results.length === 0) {
+      return res.status(404).json({ message: "Email non trouvé" });
+    }
+    
+    // Retourner seulement les infos nécessaires (pas le mot de passe)
+    const user = {
+      userId: results[0].userId,
+      email: results[0].email,
+      prénom: results[0].prénom,
+      nom: results[0].nom
+    };
+    
+    res.json(user);
+  });
+});
+
 app.put("/api/user/:id", (req, res) => {
   const userId = req.params.id;
   const { nom, prénom, email, motDePasse, telephone } = req.body;
 
-  const sql =
-    "UPDATE utilisateur SET nom = ?, `prénom` = ?, email = ?, motDePasse = ?, telephone = ? WHERE userId = ?";
+  const updates = [];
+  const values = [];
 
-  db.query(
-    sql,
-    [nom, prénom, email, motDePasse, telephone, userId],
-    (err, result) => {
-      if (err) {
-        console.error("Erreur MySQL :", err);
-        return res.status(500).json({ message: "Erreur serveur" });
+  if (nom !== undefined) updates.push("nom = ?"), values.push(nom);
+  if (prénom !== undefined) updates.push("`prénom` = ?"), values.push(prénom);
+  if (email !== undefined) updates.push("email = ?"), values.push(email);
+  if (motDePasse !== undefined) updates.push("motDePasse = ?"), values.push(motDePasse);
+  if (telephone !== undefined) updates.push("telephone = ?"), values.push(telephone);
+
+  if (updates.length === 0)
+    return res.status(400).json({ message: "Aucune donnée à mettre à jour" });
+
+  const sql = `UPDATE utilisateur SET ${updates.join(", ")} WHERE userId = ?`;
+  values.push(userId);
+
+  db.query(sql, values, (err, result) => {
+    if (err) return res.status(500).json({ message: "Erreur serveur", err });
+    if (result.affectedRows === 0)
+      return res.status(404).json({ message: "Utilisateur non trouvé" });
+
+    res.json({ message: "Profil mis à jour avec succès !" });
+  });
+});
+
+
+const resetCodes = {}; // clé = email, valeur = { code, expire }
+
+// -------------------- ENVOYER CODE RESET --------------------
+app.post("/api/user/send-reset-code", (req, res) => {
+  const { email } = req.body;
+
+  // Vérifier si l'utilisateur existe dans la DB
+  db.query("SELECT * FROM utilisateur WHERE email = ?", [email], (err, results) => {
+    if (err) return res.status(500).json({ message: "Erreur serveur", err });
+    if (results.length === 0) return res.status(400).json({ message: "Email inconnu" });
+
+    const user = results[0];
+    const code = Math.floor(100000 + Math.random() * 900000).toString(); // code 6 chiffres
+    const expire = Date.now() + 10 * 60 * 1000; // 10 min
+    resetCodes[email] = { code, expire };
+
+    const mailOptions = {
+      from: "mahjouba562@gmail.com",
+      to: email,
+      subject: "Code réinitialisation mot de passe",
+      html: `<p>Bonjour ${user.prénom},</p>
+             <p>Votre code de réinitialisation est : <b>${code}</b></p>
+             <p>Il est valable 10 minutes.</p>`,
+    };
+
+    transporter.sendMail(mailOptions, (errMail, info) => {
+      if (errMail) {
+        console.error("Erreur envoi mail reset:", errMail);
+        return res.status(500).json({ message: "Erreur envoi code" });
       }
+      res.json({ message: "Code envoyé" });
+    });
+  });
+});
 
-      if (result.affectedRows === 0) {
-        return res.status(404).json({ message: "Utilisateur non trouvé" });
-      }
+// -------------------- VERIFIER CODE ET RESET MOT DE PASSE --------------------
+app.post("/api/user/reset-password", (req, res) => {
+  const { email, code, newPassword } = req.body;
 
-      res.json({ message: "Profil mis à jour avec succès !" });
-    }
-  );
+  const record = resetCodes[email];
+  if (!record) return res.status(400).json({ message: "Aucun code demandé" });
+  if (Date.now() > record.expire) return res.status(400).json({ message: "Code expiré" });
+  if (record.code !== code) return res.status(400).json({ message: "Code incorrect" });
+
+  // Mise à jour mot de passe dans la DB
+  db.query("UPDATE utilisateur SET motDePasse = ? WHERE email = ?", [newPassword, email], (err, result) => {
+    if (err) return res.status(500).json({ message: "Erreur serveur", err });
+
+    // Supprimer code utilisé
+    delete resetCodes[email];
+
+    res.json({ message: "Mot de passe mis à jour avec succès" });
+  });
 });
 
 // 2. Récupérer les détails d’une annonce par ID
@@ -424,83 +512,98 @@ function verifyToken(req, res, next) {
     next();
   });
 }
+
+
+// ⚡ Config nodemailer
+const transporter = nodemailer.createTransport({
+  service: "gmail", // ou autre service SMTP
+  auth: {
+    user: "mahjouba562@gmail.com",
+    pass: "tdlu cvfd yefc iuph" // mot de passe d'application Gmail
+  }
+});
+
+// -------------------- REGISTER --------------------
 app.post("/register", (req, res) => {
   const { nom, prénom, email, motDePasse, telephone, role } = req.body;
-  console.log("Données reçues pour register :", req.body);
 
-  // ✅ Vérifier que tous les champs sont fournis
-  if (!nom || !prénom || !email || !motDePasse || !telephone || !role) {
-    return res
-      .status(400)
-      .json({ message: "Tous les champs sont obligatoires !" });
-  }
+  if (!nom || !prénom || !email || !motDePasse || !telephone || !role)
+    return res.status(400).json({ message: "Tous les champs sont obligatoires" });
 
-  // ✅ Vérifier que nom et prénom contiennent seulement des lettres
-  const lettersRegex = /^[A-Za-z]+$/;
-  if (!lettersRegex.test(nom) || !lettersRegex.test(prénom)) {
-    return res.status(400).json({
-      message: "Nom et prénom doivent contenir uniquement des lettres.",
-    });
-  }
+  // Vérifier email unique
+  db.query("SELECT * FROM utilisateur WHERE email = ?", [email], (err, results) => {
+    if (err) return res.status(500).json({ message: "Erreur serveur", error: err });
+    if (results.length > 0) return res.status(400).json({ message: "Email déjà utilisé" });
 
-  // ✅ Vérifier que l'email contient '@'
-  if (!email.includes("@")) {
-    return res.status(400).json({ message: "Email invalide." });
-  }
+    const token = crypto.randomBytes(32).toString("hex");
+    const tokenExpiry = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
 
-  // ✅ Vérifier le mot de passe
-  const passwordRegex = /^(?=.*[A-Z])(?=.*\d).{6,}$/;
-  if (!passwordRegex.test(motDePasse)) {
-    return res.status(400).json({
-      message:
-        "Mot de passe invalide. Il doit contenir au moins une majuscule, un chiffre et au moins 6 caractères.",
-    });
-  }
-
-  // ✅ Vérifier le téléphone
-  const phoneRegex = /^\d{8}$/;
-  if (!phoneRegex.test(telephone)) {
-    return res
-      .status(400)
-      .json({ message: "Téléphone invalide. Il doit contenir 8 chiffres." });
-  }
-
-  // ✅ Vérifier que l'email est unique dans la base
-  const checkEmailSql = "SELECT * FROM utilisateur WHERE email = ?";
-  db.query(checkEmailSql, [email], (err, results) => {
-    if (err) {
-      console.error("Erreur SQL lors de la vérification de l'email :", err);
-      return res.status(500).json({ message: "Erreur serveur", error: err });
-    }
-
-    if (results.length > 0) {
-      return res.status(400).json({ message: "Cet email est déjà utilisé." });
-    }
-
-    // ✅ Insérer l'utilisateur
     const sql = `
-      INSERT INTO utilisateur (nom, prénom, email, motDePasse, telephone, role)
-      VALUES (?, ?, ?, ?, ?, ?)
+      INSERT INTO utilisateur (nom, prénom, email, motDePasse, telephone, role, isVerified, verificationToken, tokenExpiry)
+      VALUES (?, ?, ?, ?, ?, ?, false, ?, ?)
     `;
 
-    db.query(
-      sql,
-      [nom, prénom, email, motDePasse, telephone, role],
-      (err, result) => {
-        if (err) {
-          console.error("Erreur SQL complète :", err);
-          return res
-            .status(500)
-            .json({ message: "Erreur serveur", error: err });
+    db.query(sql, [nom, prénom, email, motDePasse, telephone, role, token, tokenExpiry], (err2, result) => {
+      if (err2) return res.status(500).json({ message: "Erreur serveur", error: err2 });
+
+      // 🔹 Lien de vérification via Ngrok 
+      const verificationLink = `https://semireligious-charissa-nonprepositionally.ngrok-free.dev/api/verify-email/${token}`;
+
+      const mailOptions = {
+        from: "mahjouba562@gmail.com",
+        to: email,
+        subject: "Vérification de votre email",
+        html: `<p>Bonjour ${prénom},</p>
+               <p>Veuillez vérifier votre email en cliquant sur ce lien :</p>
+               <a href="${verificationLink}">Vérifier mon email</a>
+               <p>Ce lien expire dans 10 minutes.</p>`,
+      };
+
+      transporter.sendMail(mailOptions, (errMail) => {
+        if (errMail) {
+          console.error("Erreur envoi mail :", errMail);
+          return res.status(500).json({ message: "Impossible d'envoyer l'email de vérification" });
         }
-        res.status(201).json({
-          message: "Utilisateur enregistré avec succès !",
-          userId: result.insertId,
-        });
+        res.status(201).json({ message: "Inscription réussie, vérifiez votre email !" });
+      });
+    });
+  });
+});
+
+// -------------------- VERIFY EMAIL --------------------
+app.get("/api/verify-email/:token", (req, res) => {
+  const { token } = req.params;
+
+  db.query("SELECT * FROM utilisateur WHERE verificationToken = ?", [token], (err, results) => {
+    if (err) return res.status(500).send("Erreur serveur");
+    if (results.length === 0) return res.status(400).send("Token invalide");
+
+    const user = results[0];
+
+    if (new Date() > new Date(user.tokenExpiry)) {
+      return res.status(400).send("Token expiré");
+    }
+
+    db.query(
+      "UPDATE utilisateur SET isVerified = 1, verificationToken = NULL, tokenExpiry = NULL WHERE userId = ?",
+      [user.userId],
+      (err2) => {
+        if (err2) return res.status(500).send("Erreur serveur");
+        // 🔹 Rediriger vers login après vérification
+        res.redirect("http://localhost:3000/login");
       }
     );
   });
 });
+
+// -------------------- PURGE COMPTES NON VÉRIFIÉS --------------------
+setInterval(() => {
+  db.query(
+    "DELETE FROM utilisateur WHERE isVerified = false AND created_at < NOW() - INTERVAL 10 MINUTE",
+    (err) => { if (err) console.log("Erreur purge:", err); }
+  );
+}, 600000);
+
 
 // Route POST login
 app.post("/login", (req, res) => {
