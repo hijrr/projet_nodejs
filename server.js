@@ -607,11 +607,25 @@ app.get("/api/verify-email/:token", (req, res) => {
 
 // -------------------- PURGE COMPTES NON VÉRIFIÉS --------------------
 setInterval(() => {
-  db.query(
-    "DELETE FROM utilisateur WHERE isVerified = false AND created_at < NOW() - INTERVAL 10 MINUTE",
-    (err) => { if (err) console.log("Erreur purge:", err); }
-  );
-}, 600000);
+  console.log("⏳ Vérification des comptes non vérifiés…");
+
+  const sql = `
+    DELETE FROM utilisateur
+    WHERE isVerified = 0
+    AND dateInscri <= NOW() - INTERVAL 5 MINUTE;
+
+  `;
+
+  db.query(sql, (err, result) => {
+    if (err) {
+      console.error("❌ Erreur purge:", err);
+      return;
+    }
+
+    console.log(`🗑️ Comptes supprimés : ${result.affectedRows}`);
+  });
+
+}, 60000); // 1 minute
 
 
 // Route POST login
@@ -904,7 +918,7 @@ app.get("/api/activities", (req, res) => {
 
 // ✅ Récupérer tous les utilisateurs
 app.get("/api/utilisateurs", (req, res) => {
-  const sql = "SELECT * FROM utilisateur";
+  const sql = "SELECT * FROM utilisateur where role!='admin'";
   db.query(sql, (err, results) => {
     if (err) {
       console.error("Erreur de récupération :", err);
@@ -976,34 +990,68 @@ app.put("/annonces/:id", (req, res) => {
 });
 
 
-/* 🗑️ 3. Supprimer une annonce */
-app.delete("/annoncesDelite/:id", (req, res) => {
-  const { id } = req.params;
+// en haut du fichier (si pas déjà)
+const util = require("util");
+// db est ton connection object mysql (ex: mysql.createConnection / mysql.createPool)
+const query = util.promisify(db.query).bind(db);
 
-  const sql = "DELETE FROM annonce WHERE idAnnonce = ?";
-  db.query(sql, [id], (err, result) => {
-    if (err) {
-      console.error("Erreur suppression :", err);
+app.delete("/annoncesDelite/:id", async (req, res) => {
+  const rawId = req.params.id;
+  const id = parseInt(rawId, 10);
 
-      // Cas particulier : violation de contrainte de clé étrangère
-      if (err.errno === 1451) {
-        return res.status(400).json({
-          message:
-            "Impossible de supprimer cette annonce car elle est liée à une ou plusieurs demandes de location.",
-        });
-      }
+  if (Number.isNaN(id)) {
+    return res.status(400).json({ message: "Identifiant d'annonce invalide." });
+  }
 
-      // Autres erreurs
-      return res.status(500).json({ message: "Erreur serveur" });
+  try {
+    // 1) vérifier que l'annonce existe
+    const rowsAnnonce = await query("SELECT idAnnonce FROM annonce WHERE idAnnonce = ?", [id]);
+    if (!rowsAnnonce || rowsAnnonce.length === 0) {
+      return res.status(404).json({ message: "Annonce non trouvée." });
     }
 
-    if (result.affectedRows === 0) {
-      return res.status(404).json({ message: "Annonce non trouvée" });
+    // 2) vérifier s'il y a des favoris liés
+    const favRows = await query("SELECT COUNT(*) AS cnt FROM annonce_favorise WHERE idAnnonce = ?", [id]);
+    const favCount = favRows && favRows[0] ? Number(favRows[0].cnt || 0) : 0;
+
+    // 3) vérifier s'il y a des demandes de location liées
+    const demRows = await query("SELECT COUNT(*) AS cnt FROM demandeloc WHERE annonceId = ?", [id]);
+    const demCount = demRows && demRows[0] ? Number(demRows[0].cnt || 0) : 0;
+
+    if (favCount > 0 || demCount > 0) {
+      const reasons = [];
+      if (favCount > 0) reasons.push(`${favCount} favorite(s)`);
+      if (demCount > 0) reasons.push(`${demCount} demande(s) de location`);
+      return res.status(400).json({
+        message: `Impossible de supprimer cette annonce car elle est liée à ${reasons.join(" et ")}.`,
+      });
     }
 
-    res.json({ message: "Annonce supprimée avec succès" });
-  });
+    // 4) suppression
+    const deleteResult = await query("DELETE FROM annonce WHERE idAnnonce = ?", [id]);
+
+    if (deleteResult.affectedRows === 0) {
+      // cas improbable puisque on a vérifié l'existence, mais on gère
+      return res.status(404).json({ message: "Annonce non trouvée (échec suppression)." });
+    }
+
+    return res.json({ message: "Annonce supprimée avec succès." });
+  } catch (err) {
+    console.error("Erreur endpoint /annoncesDelite:", err);
+
+    // si c'est une violation FK côté DB (s'il y a une contrainte inconnue)
+    if (err && err.errno === 1451) {
+      return res.status(400).json({
+        message:
+          "Impossible de supprimer cette annonce : des enregistrements externes y font référence (clé étrangère).",
+      });
+    }
+
+    return res.status(500).json({ message: "Erreur serveur." });
+  }
 });
+
+
 
 
 // Route pour supprimer une annonce
@@ -1951,14 +1999,37 @@ app.get("/api/mes-notifications", (req, res) => {
 });
 
 
-// 🔹 Supprimer une offre
+// 🔹 Suppression interdite si l'offre a été achetée
 app.delete("/api/offresSupp/:idOff", (req, res) => {
   const idOff = req.params.idOff;
-  db.query("DELETE FROM offre WHERE idOff = ?", [idOff], (err) => {
-    if (err) return res.status(500).json({ error: err });
-    res.json({ message: "Offre supprimée avec succès" });
-  });
+
+  // 1️⃣ Vérifier si l'offre existe dans la table Acheter
+  db.query(
+    "SELECT * FROM acheter WHERE idOffre = ?",
+    [idOff],
+    (err, results) => {
+      if (err) return res.status(500).json({ error: "Erreur serveur." });
+
+      // Offre déjà achetée → suppression interdite
+      if (results.length > 0) {
+        return res.status(400).json({
+          message: "Impossible de supprimer cette offre car elle a déjà été achetée.",
+        });
+      }
+
+      // 2️⃣ Supprimer l'offre si elle n'est pas achetée
+      db.query("DELETE FROM offre WHERE idOff = ?", [idOff], (err) => {
+        if (err)
+          return res
+            .status(500)
+            .json({ error: "Erreur lors de la suppression." });
+
+        res.json({ message: "Offre supprimée avec succès." });
+      });
+    }
+  );
 });
+
 
 app.get("/api/offres/:idOff", (req, res) => {
   const idOff = parseInt(req.params.idOff, 10);
